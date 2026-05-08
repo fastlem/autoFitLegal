@@ -1,0 +1,280 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        /* Пользовательские стили для блоков */
+        .title_legal {
+            position: absolute;
+            top: 5%;
+            left: 4%;
+            width: 92%;
+            height: 6%;
+            color: black;
+            font-family: Arial, sans-serif;
+            /* Скрипт добавит overflow:hidden, box-sizing, и т.д., но не тронет эти свойства */
+        }
+        /* Можно добавить второй блок с другим классом, но скрипт обработает только .title_legal */
+        .custom-disclaimer {
+            position: relative;
+            width: 300px;
+            height: 50px;
+            background: #333;
+            color: yellow;
+        }
+    </style>
+</head>
+<body>
+    <div class="title_legal">
+        Реклама. ООО Аптечная сеть "Гармония здоровья" ИНН 2462059142. *Под формулировкой «нового поколения» имеется в виду сублингвальная форма доставки транс-ресвератрола – одного из компонентов продукта. ** Биологически активная добавка к пище "ФЕМИНАТАБС" (FEMINATABS"), 45 таблеток для рассасывания, 170 мг, номер СГР RU.77.99.11.003.R.000821.04.24. Реклама. ООО Аптечная сеть "Гармония здоровья" ИНН 2462059142. *Под формулировкой «нового поколения» имеется в виду сублингвальная форма доставки транс-ресвератрола – одного из компонентов продукта. ** Биологически активная добавка к пище "ФЕМИНАТАБС" (FEMINATABS"), 45 таблеток для рассасывания, 170 мг, номер СГР RU.77.99.11.003.R.000821.04.24
+    </div>
+    <div class="title_legal" style="top: 85%; height: 4%;">
+        Короткий текст — подберётся свой размер шрифта.
+    </div>
+
+    <!-- Подключаем скрипт -->
+    <script>
+/**
+ * autoFitLegal.js – автоматическое масштабирование текста в блоках с дисклеймерами
+ * 
+ * Использование:
+ *   1. Подключите скрипт на страницу:
+ *   2. (Опционально) Вызовите инициализацию с кастомными настройками:
+ *      AutoFitLegal.init({
+ *        selector: '.legal-text',     // CSS селектор блоков (по умолчанию '.title_legal')
+ *        minFontSize: 1,              // минимальный шрифт в px
+ *        maxFontSize: 200,            // максимальный шрифт в px
+ *        tolerance: 1,                // допустимый запас в px (для округлений)
+ *        lineHeightStep: 0.05,        // шаг уменьшения line-height
+ *        minLineHeight: 1.0,          // минимальный line-height
+ *        defaultLineHeight: 1.2,      // стандартный line-height для подбора
+ *        observeResize: true,         // отслеживать изменение размеров блоков
+ *        observeText: true,           // отслеживать изменение текста
+ *        runOnLoad: true              // запускать после загрузки страницы
+ *      });
+ * 
+ *   3. Если блоки создаются динамически, можно вызвать AutoFitLegal.run() вручную.
+ */
+
+(function(global) {
+    'use strict';
+
+    // Конструктор менеджера
+    function AutoFitLegal(options) {
+        this.options = Object.assign({}, this.defaults, options);
+        this.observedElements = new Set();
+        this.resizeObserver = null;
+        this.textObserver = null;
+        this.init();
+    }
+
+    AutoFitLegal.prototype.defaults = {
+        selector: '.title_legal',
+        minFontSize: 1,
+        maxFontSize: 200,
+        tolerance: 1,
+        lineHeightStep: 0.05,
+        minLineHeight: 1.0,
+        defaultLineHeight: 1.2,
+        observeResize: true,
+        observeText: true,
+        runOnLoad: true
+    };
+
+    // Применение необходимых CSS-стилей к элементу (без переопределения пользовательских)
+    AutoFitLegal.prototype.applyRequiredStyles = function(el) {
+        // Сохраняем оригинальные стили, которые могут быть заданы пользователем,
+        // но перезаписываем только то, что критично для работы скрипта.
+        // Используем !important? Нет, скрипт не должен конфликтовать.
+        // Просто устанавливаем inline-стили, которые можно перебить только пользовательскими !important.
+        const styles = {
+            overflow: 'hidden',
+            boxSizing: 'border-box',
+            wordBreak: 'break-word',
+            whiteSpace: 'normal',
+            padding: '0',
+            margin: '0'
+        };
+        // Применяем, только если они ещё не заданы напрямую (но лучше перезаписать для гарантии)
+        for (let prop in styles) {
+            if (styles.hasOwnProperty(prop)) {
+                // Устанавливаем, но без !important – пользователь может переопределить через более специфичный селектор
+                el.style[prop] = styles[prop];
+            }
+        }
+        // Сбрасываем font-size и line-height, чтобы измерить естественное поведение
+        // (важно не удалять их, если они были явно заданы до скрипта – но для измерения всё равно сбрасываем)
+        // Поэтому временно сохраним и восстановим позже – нет, fitText сделает это.
+    };
+
+    // Основной алгоритм подбора размера шрифта для одного элемента
+    AutoFitLegal.prototype.fitText = function(element) {
+        if (!element || !element.innerText) return;
+
+        // Применяем обязательные стили (если не были применены ранее)
+        this.applyRequiredStyles(element);
+
+        // Временно сбрасываем установленные размеры шрифта и line-height, чтобы измерить естественный scrollHeight
+        element.style.fontSize = '';
+        element.style.lineHeight = '';
+
+        const minFontSize = this.options.minFontSize;
+        let maxFontSize = Math.min(
+            this.options.maxFontSize,
+            element.clientHeight,
+            element.clientWidth / 1.5
+        );
+        if (maxFontSize < minFontSize) maxFontSize = minFontSize;
+
+        const tolerance = this.options.tolerance;
+
+        // Проверка влезания при заданных fontSize и lineHeight
+        const checkFit = (fontSize, lineHeight) => {
+            element.style.fontSize = fontSize + 'px';
+            element.style.lineHeight = lineHeight;
+            // Форсируем перерасчёт макета
+            void element.offsetHeight;
+            const scrollH = element.scrollHeight;
+            const clientH = element.clientHeight;
+            const scrollW = element.scrollWidth;
+            const clientW = element.clientWidth;
+            return (scrollH <= clientH + tolerance) && (scrollW <= clientW + tolerance);
+        };
+
+        let bestFontSize = minFontSize;
+        let bestLineHeight = this.options.defaultLineHeight;
+
+        // Бинарный поиск с lineHeight по умолчанию
+        let low = minFontSize;
+        let high = maxFontSize;
+        while (low <= high) {
+            const mid = Math.floor((low + high) / 2);
+            if (checkFit(mid, this.options.defaultLineHeight)) {
+                bestFontSize = mid;
+                bestLineHeight = this.options.defaultLineHeight;
+                low = mid + 1;
+            } else {
+                high = mid - 1;
+            }
+        }
+
+        // Если на минимальном шрифте не влезает – уменьшаем lineHeight
+        if (!checkFit(bestFontSize, bestLineHeight) && bestFontSize === minFontSize) {
+            let currentLH = this.options.defaultLineHeight;
+            while (currentLH >= this.options.minLineHeight) {
+                if (checkFit(minFontSize, currentLH)) {
+                    bestFontSize = minFontSize;
+                    bestLineHeight = currentLH;
+                    break;
+                }
+                currentLH -= this.options.lineHeightStep;
+            }
+        }
+
+        // Применяем найденные значения
+        element.style.fontSize = bestFontSize + 'px';
+        element.style.lineHeight = bestLineHeight;
+
+        // Финальная страховка: если всё равно чуть-чуть не влезло, уменьшаем шрифт на 1px
+        if (!checkFit(bestFontSize, bestLineHeight) && bestFontSize > minFontSize) {
+            element.style.fontSize = (bestFontSize - 1) + 'px';
+        }
+    };
+
+    // Обработка всех подходящих элементов
+    AutoFitLegal.prototype.run = function() {
+        const elements = document.querySelectorAll(this.options.selector);
+        elements.forEach(el => this.fitText(el));
+    };
+
+    // Инициализация наблюдателей
+    AutoFitLegal.prototype.initObservers = function() {
+        const elements = document.querySelectorAll(this.options.selector);
+        if (elements.length === 0) return;
+
+        // Удаляем старые наблюдения
+        if (this.resizeObserver) {
+            this.observedElements.forEach(el => this.resizeObserver.unobserve(el));
+            this.observedElements.clear();
+        }
+        if (this.textObserver) {
+            this.textObserver.disconnect();
+        }
+
+        // ResizeObserver – отслеживание изменения размеров блоков
+        if (this.options.observeResize && window.ResizeObserver) {
+            this.resizeObserver = new ResizeObserver(() => this.run());
+            elements.forEach(el => {
+                this.resizeObserver.observe(el);
+                this.observedElements.add(el);
+            });
+        } else if (this.options.observeResize) {
+            // Fallback – ресайз окна (менее точно, но работает)
+            window.addEventListener('resize', () => this.run());
+        }
+
+        // MutationObserver – отслеживание изменения текста
+        if (this.options.observeText && window.MutationObserver) {
+            this.textObserver = new MutationObserver(() => this.run());
+            elements.forEach(el => {
+                this.textObserver.observe(el, { childList: true, subtree: true, characterData: true });
+            });
+        }
+    };
+
+    // Полная инициализация
+    AutoFitLegal.prototype.init = function() {
+        if (this.options.runOnLoad) {
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', () => {
+                    this.run();
+                    this.initObservers();
+                });
+            } else {
+                this.run();
+                this.initObservers();
+            }
+        } else {
+            // Пользователь вызовет run() сам
+            this.initObservers();
+        }
+    };
+
+    // Экспорт в глобальную область (однотонный синглтон)
+    let instance = null;
+    global.AutoFitLegal = {
+        init: function(options) {
+            if (instance) {
+                // Если уже инициализирован, можно обновить настройки (простая реализация)
+                instance.options = Object.assign(instance.defaults, options);
+                instance.run();
+                instance.initObservers();
+            } else {
+                instance = new AutoFitLegal(options);
+            }
+            return instance;
+        },
+        run: function() {
+            if (instance) instance.run();
+            else console.warn('AutoFitLegal: сначала вызовите .init()');
+        },
+        // Получить экземпляр (для продвинутого использования)
+        getInstance: function() {
+            return instance;
+        }
+    };
+
+    // Автоматическая инициализация с настройками по умолчанию,
+    // если на странице есть элемент .title_legal и скрипт не был вызван вручную
+    if (document.querySelector('.title_legal')) {
+        // Небольшая задержка, чтобы пользователь мог переопределить настройки до автостарта
+        setTimeout(() => {
+            if (!instance) {
+                global.AutoFitLegal.init();
+            }
+        }, 0);
+    }
+})(typeof window !== 'undefined' ? window : this);        
+    </script>
+    <!-- Если нужны кастомные настройки, вызовите после подключения -->
+</body>
+</html>
